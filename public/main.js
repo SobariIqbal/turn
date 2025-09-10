@@ -13,7 +13,7 @@ let isOfferer = false;
 const ICE_SERVERS = [
   { urls: 'stun:stun.l.google.com:19302' },
   // FOR TESTING: replace the next line with your TURN server
-  // { urls: 'turn:YOUR_TURN_IP:3478', username: 'test', credential: 'pass' }
+  { urls: 'turn:136.244.103.42:443', username: 'iqbal', credential: 'sobari' }
 ];
 
 async function startLocal() {
