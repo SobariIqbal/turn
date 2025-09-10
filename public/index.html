@@ -1,0 +1,20 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>WebRTC test</title>
+  <style>video{width:40%;margin:5px;border:1px solid #ccc}</style>
+</head>
+<body>
+  <h3>WebRTC test (laptop ↔ phone)</h3>
+  Room: <input id="room" value="room1" />
+  <button id="join">Join</button>
+  <button id="call">Call / Start Offer</button>
+  <button id="hangup">Hangup</button>
+  <div>
+    <video id="local" autoplay playsinline muted></video>
+    <video id="remote" autoplay playsinline></video>
+  </div>
+  <script src="main.js"></script>
+</body>
+</html>
