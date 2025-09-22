@@ -1,20 +1,30 @@
-<!doctype html>
-<html>
+<!DOCTYPE html>
+<html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <title>WebRTC test</title>
-  <style>video{width:40%;margin:5px;border:1px solid #ccc}</style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Join WebRTC Session</title>
+    <style>
+        body { font-family: Arial, sans-serif; }
+        .join-container { max-width: 300px; margin: 50px auto; text-align: center; }
+        input { width: 100%; padding: 10px; margin: 10px 0; }
+        button { padding: 10px 20px; margin: 10px 5px; }
+        #participants { display: flex; flex-wrap: wrap; }
+        .participant { margin: 10px; }
+        video { width: 200px; height: auto; }
+    </style>
 </head>
 <body>
-  <h3>WebRTC test (laptop ↔ phone)</h3>
-  Room: <input id="room" value="room1" />
-  <button id="join">Join</button>
-  <button id="call">Call / Start Offer</button>
-  <button id="hangup">Hangup</button>
-  <div>
-    <video id="local" autoplay playsinline muted></video>
-    <video id="remote" autoplay playsinline></video>
-  </div>
-  <script src="main.js"></script>
+    <div class="join-container">
+        <h1>Join Session</h1>
+        <input type="text" id="username" placeholder="Enter your name" required>
+        <input type="text" id="room-id" placeholder="Enter room ID" required>
+        <button id="join-btn">Join</button>
+        <button id="mute-btn">Mute</button>
+        <button id="video-btn">Turn Off Video</button>
+        <button id="share-screen-btn">Share Screen</button>
+    </div>
+    <div id="participants"></div>
+    <script src="main.js"></script>
 </body>
 </html>

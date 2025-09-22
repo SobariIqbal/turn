@@ -1,55 +1,45 @@
-// server.js
-// Minimal Express + ws signaling server
-const express = require('express');
-const http = require('http');
 const WebSocket = require('ws');
-const path = require('path');
 
-const app = express();
-app.use(express.static(path.join(__dirname, 'public')));
+const SIGNALING_PORT = process.env.SIGNALING_PORT || 8081;
+const wss = new WebSocket.Server({ port: Number(SIGNALING_PORT) });
 
-const server = http.createServer(app);
-const wss = new WebSocket.Server({ server });
+let nextClientId = 1;
 
-const rooms = new Map(); // roomId -> Set of ws
+wss.on('listening', () => console.log(`Signaling server listening on ws://localhost:${SIGNALING_PORT}`));
 
-wss.on('connection', (ws) => {
-  ws.on('message', (msg) => {
-    let m;
-    try { m = JSON.parse(msg); } catch (e) { return; }
-    const { type, room, data } = m;
+wss.on('connection', ws => {
+  const id = String(nextClientId++);
+  ws._clientId = id;
+  console.log('Client connected', id);
 
-    if (type === 'join') {
-      ws.room = room;
-      if (!rooms.has(room)) rooms.set(room, new Set());
-      rooms.get(room).add(ws);
-      // notify others if room has 2 peers
-      const others = [...rooms.get(room)].filter(s => s !== ws);
-      if (others.length >= 1) {
-        ws.send(JSON.stringify({ type: 'ready' }));
-        others.forEach(o => o.send(JSON.stringify({ type: 'peer-joined' })));
+  // notify client of its id
+  ws.send(JSON.stringify({ type: 'id', id }));
+
+  ws.on('message', message => {
+    let data = null;
+    try { data = JSON.parse(message); } catch (e) { console.warn('Invalid JSON from', id); return; }
+
+    // Attach sender id
+    data.from = id;
+
+    // If message has `to`, forward only to that client
+    if (data.to) {
+      const target = Array.from(wss.clients).find(c => c._clientId === data.to && c.readyState === WebSocket.OPEN);
+      if (target) {
+        target.send(JSON.stringify(data));
+      } else {
+        console.warn('Target not found or not open:', data.to);
       }
       return;
     }
 
-    // forward messages to other peer(s) in the same room
-    if (ws.room && rooms.has(ws.room)) {
-      const peers = rooms.get(ws.room);
-      for (const peer of peers) {
-        if (peer !== ws && peer.readyState === WebSocket.OPEN) {
-          peer.send(JSON.stringify({ type, data }));
-        }
+    // Otherwise broadcast to all other clients in the same room (no rooms tracking here)
+    wss.clients.forEach(client => {
+      if (client !== ws && client.readyState === WebSocket.OPEN) {
+        client.send(JSON.stringify(data));
       }
-    }
+    });
   });
 
-  ws.on('close', () => {
-    if (ws.room && rooms.has(ws.room)) {
-      rooms.get(ws.room).delete(ws);
-      if (rooms.get(ws.room).size === 0) rooms.delete(ws.room);
-    }
-  });
+  ws.on('close', () => console.log('Client disconnected', id));
 });
-
-const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => console.log('Server listening on', PORT));
