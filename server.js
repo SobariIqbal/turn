@@ -1,11 +1,33 @@
+const http = require('http');
+const path = require('path');
+const fs = require('fs');
 const WebSocket = require('ws');
+const PORT = Number(process.env.PORT || process.env.SIGNALING_PORT || 8080);
 
-const SIGNALING_PORT = process.env.SIGNALING_PORT || 8081;
-const wss = new WebSocket.Server({ port: Number(SIGNALING_PORT) });
+// Simple static file server for the 'public' directory
+const publicDir = path.join(__dirname, 'public');
+const server = http.createServer((req, res) => {
+  // serve index.html for root or any unknown path (SPA-friendly)
+  let reqPath = req.url.split('?')[0];
+  if (reqPath === '/' || reqPath === '') reqPath = '/index.html';
+  const filePath = path.join(publicDir, decodeURIComponent(reqPath));
+  fs.stat(filePath, (err, stats) => {
+    if (err || !stats.isFile()) {
+      // fallback to index.html for SPA
+      const index = path.join(publicDir, 'index.html');
+      fs.createReadStream(index).pipe(res);
+      return;
+    }
+    const stream = fs.createReadStream(filePath);
+    stream.pipe(res);
+  });
+});
+
+const wss = new WebSocket.Server({ server });
 
 let nextClientId = 1;
 
-wss.on('listening', () => console.log(`Signaling server listening on ws://localhost:${SIGNALING_PORT}`));
+server.listen(PORT, '127.0.0.1', () => console.log(`Server listening on http://localhost:${PORT}`));
 
 wss.on('connection', ws => {
   const id = String(nextClientId++);
@@ -33,7 +55,7 @@ wss.on('connection', ws => {
       return;
     }
 
-    // Otherwise broadcast to all other clients in the same room (no rooms tracking here)
+    // Otherwise broadcast to all other clients
     wss.clients.forEach(client => {
       if (client !== ws && client.readyState === WebSocket.OPEN) {
         client.send(JSON.stringify(data));
