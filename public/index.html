@@ -18,11 +18,42 @@
     <div class="join-container">
         <h1>Join Session</h1>
         <input type="text" id="username" placeholder="Enter your name" required>
-        <input type="text" id="room-id" placeholder="Enter room ID" required>
+        <div style="text-align:left; margin-top:8px;">
+            <label for="role-select">Role</label>
+            <select id="role-select" style="width:100%;">
+                <option value="">-- Select role --</option>
+                <option value="caller">Digital Reception (Caller)</option>
+                <option value="callee">Reception Desk (Callee)</option>
+            </select>
+        </div>
+        <div style="text-align:left; margin-top:8px;">
+            <label for="language-select">Language</label>
+            <select id="language-select" style="width:100%;">
+                <option value="">-- Select language --</option>
+                <option value="en">English</option>
+                <option value="nl">Dutch</option>
+                <option value="de">German</option>
+                <option value="fr">French</option>
+            </select>
+        </div>
+        <input type="text" id="room-id" placeholder="Enter room ID (optional)" />
         <button id="join-btn">Join</button>
         <button id="mute-btn">Mute</button>
         <button id="video-btn">Turn Off Video</button>
         <button id="share-screen-btn">Share Screen</button>
+        <hr>
+        <div id="call-controls" style="display:none; text-align:left;">
+            <label for="peer-select">Room participants:</label>
+            <select id="peer-select" style="width:100%;"></select>
+            <div style="margin-top:8px;">
+                <button id="call-btn">Call</button>
+                <button id="call-all-btn">Call All</button>
+                <button id="end-btn" disabled>End Call</button>
+                <button id="pickup-btn" disabled>Pick Up</button>
+                <button id="decline-btn" disabled>Decline</button>
+            </div>
+            <div id="call-status" style="margin-top:8px; color:#555;"></div>
+        </div>
     </div>
     <div id="participants"></div>
     <script src="main.js"></script>
