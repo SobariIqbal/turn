@@ -4,12 +4,14 @@ document.getElementById('join-btn').addEventListener('click', async () => {
     const username = document.getElementById('username').value;
     const explicitRoom = document.getElementById('room-id').value;
     const role = (document.getElementById('role-select') && document.getElementById('role-select').value) || '';
+    const company = (document.getElementById('company-select') && document.getElementById('company-select').value) || '';
     const lang = (document.getElementById('language-select') && document.getElementById('language-select').value) || '';
-    // Prefer language-based room if role+language provided; fallback to explicit room; else block
-    const roomId = (role && lang) ? `lang-${lang}` : explicitRoom;
+    const companyKey = (company || '').toString().trim().toLowerCase();
+    // Prefer company-based room if role+company provided; fallback to explicit room; else block
+    const roomId = (role && companyKey) ? `${companyKey}` : explicitRoom;
 
     if (!username || !roomId) {
-        alert('Please enter your name and select role+language or specify a room ID.');
+    alert('Please enter your name and select role+company or specify a room ID.');
         return;
     }
 
@@ -100,7 +102,7 @@ const iceServers = [
         }
 
     // connect to signaling and join
-    joinSession({ stream, iceServers, peers, roomId, username, role, setLocalId: id => localId = id });
+    joinSession({ stream, iceServers, peers, roomId, username, role, lang, setLocalId: id => localId = id });
 
     // After join, enable call UI once we get roster
     } catch (err) {
@@ -110,17 +112,22 @@ const iceServers = [
 
 
 async function joinSession(opts) {
-    const { stream, iceServers, peers, roomId, username, role, setLocalId } = opts;
+    const { stream, iceServers, peers, roomId, username, role, lang, setLocalId } = opts;
     // local-only setup: signaling server runs on localhost:8080
     const signalingSocket = new WebSocket((location.protocol === 'https:' ? 'wss' : 'ws') + '://' + location.host);
 
     let localId = null;
     let roster = [];
+    let fullRoster = [];
     let ringingFrom = null; // stores the caller id when receiving a ring
     let inCallWith = null; // current peer id you're in call with
     let ringTimer = null; // timeout for outgoing ring
     let huntAllActive = false; // ring-all (hunt group) active
     let huntWinner = null; // id of first pickup
+    let serialActive = false; // serial dialing active
+    let serialQueue = []; // ordered list of ids to dial
+    let serialIndex = -1; // current index in serialQueue
+    let tempPickupUi = false; // temporarily show pickup for non-callees during escalation
 
     // UI elements for calling
     const callControls = document.getElementById('call-controls');
@@ -128,6 +135,8 @@ async function joinSession(opts) {
     const callBtn = document.getElementById('call-btn');
     const endBtn = document.getElementById('end-btn');
     const callAllBtn = document.getElementById('call-all-btn');
+    const callModeWrap = document.getElementById('call-mode-wrap');
+    const callModeSelect = document.getElementById('call-mode');
     const pickupBtn = document.getElementById('pickup-btn');
     const declineBtn = document.getElementById('decline-btn');
     const callStatus = document.getElementById('call-status');
@@ -141,7 +150,8 @@ async function joinSession(opts) {
         if (pickupBtn) pickupBtn.style.display = 'none';
         if (declineBtn) declineBtn.style.display = 'none';
         if (peerSelect) peerSelect.parentElement.style.display = 'none';
-        callStatus.textContent = 'Caller mode: select language and press Call All.';
+        if (callModeWrap) callModeWrap.style.display = 'block';
+        callStatus.textContent = 'Caller mode: choose Call Mode and press Call All.';
     } else if (role === 'callee') {
         if (callBtn) callBtn.style.display = 'none';
         if (callAllBtn) callAllBtn.style.display = 'none';
@@ -156,7 +166,12 @@ async function joinSession(opts) {
 
     signalingSocket.onopen = () => {
         console.log('Connected to the signaling server');
-        signalingSocket.send(JSON.stringify({ type: 'join', username, roomId }));
+    signalingSocket.send(JSON.stringify({ type: 'join', username, roomId, lang, role }));
+        // Start periodic heartbeat to maintain presence
+        const HEARTBEAT_MS = 20000;
+        setInterval(() => {
+            try { signalingSocket.send(JSON.stringify({ type: 'heartbeat' })); } catch(_){}
+        }, HEARTBEAT_MS);
     };
 
     function sendToPeer(type, payload, to) {
@@ -177,12 +192,61 @@ async function joinSession(opts) {
         inCallWith = null;
         huntAllActive = false;
         huntWinner = null;
+        serialActive = false;
+        serialQueue = [];
+        serialIndex = -1;
         if (pickupBtn) pickupBtn.disabled = true;
         if (declineBtn) declineBtn.disabled = true;
         if (endBtn) endBtn.disabled = true;
         if (callBtn) callBtn.disabled = false;
         if (callAllBtn) callAllBtn.disabled = false;
         callStatus.textContent = 'Idle.';
+        if (tempPickupUi && role !== 'callee') {
+            if (pickupBtn) pickupBtn.style.display = 'none';
+            if (declineBtn) declineBtn.style.display = 'none';
+            tempPickupUi = false;
+        }
+    }
+    function sortByLongestAvailable(list) {
+        return list.slice().sort((a, b) => {
+            const ams = (a.lastCallAgoMs == null ? Number.POSITIVE_INFINITY : a.lastCallAgoMs);
+            const bms = (b.lastCallAgoMs == null ? Number.POSITIVE_INFINITY : b.lastCallAgoMs);
+            if (ams !== bms) return bms - ams; // larger ms = longer since last call
+            const ai = parseInt(a.id, 10);
+            const bi = parseInt(b.id, 10);
+            if (!Number.isNaN(ai) && !Number.isNaN(bi)) return ai - bi;
+            return String(a.id).localeCompare(String(b.id));
+        });
+    }
+
+    function startSerialDial(candidates, timeoutMs) {
+        const list = candidates.filter(p => (p.status || 'online') === 'online');
+        if (list.length === 0) { callStatus.textContent = 'No available recipients for serial dialing.'; return; }
+        serialActive = true;
+        serialQueue = list.map(p => p.id);
+        serialIndex = 0;
+        if (callBtn) callBtn.disabled = true;
+        if (callAllBtn) callAllBtn.disabled = true;
+        ringNextSerial(timeoutMs);
+    }
+
+    function ringNextSerial(timeoutMs) {
+        clearRingTimer();
+        if (!serialActive || serialIndex < 0 || serialIndex >= serialQueue.length) {
+            callStatus.textContent = 'No one responded.';
+            resetUiState();
+            return;
+        }
+        const targetId = serialQueue[serialIndex];
+        inCallWith = targetId;
+        callStatus.textContent = `Ringing #${targetId} (${serialIndex + 1}/${serialQueue.length})...`;
+        sendToPeer('ring', { roomId }, targetId);
+        ringTimer = setTimeout(() => {
+            if (!serialActive) return;
+            sendToPeer('cancel', { roomId }, targetId);
+            serialIndex++;
+            ringNextSerial(timeoutMs);
+        }, timeoutMs);
     }
 
     function closePeer(remoteId) {
@@ -316,23 +380,51 @@ async function joinSession(opts) {
 
         switch (data.type) {
             case 'roster': {
-                roster = (data.roster || []).filter(p => p.id !== localId);
+                fullRoster = (data.roster || []).filter(p => p.id !== localId);
+                let incoming = fullRoster.slice();
+                // If I'm a caller (digital reception), only show receptionists (callees)
+                if (role === 'caller') {
+                    incoming = incoming.filter(p => (p.role || '') === 'callee');
+                }
+                roster = incoming;
                 // Update UI
                 if (callControls) callControls.style.display = 'block';
                 if (peerSelect) {
                     peerSelect.innerHTML = '';
                     roster.forEach(p => {
                         const opt = document.createElement('option');
-                        opt.value = p.id; opt.textContent = `${p.username || 'User'} (#${p.id})`;
+                        const st = p.status || 'online';
+                        const langTag = p.lang ? ` • ${p.lang}` : '';
+                        opt.value = p.id;
+                        opt.textContent = `${p.username || 'User'} (#${p.id}) • ${st}${langTag}`;
+                        // Optionally disable offline/busy entries for 1:1 calls
+                        if (st !== 'online') opt.disabled = true;
+                        // Keep a concise tooltip without last-call info
+                        opt.title = `Status: ${st}${p.lang ? ` | Lang: ${p.lang}` : ''}`;
                         peerSelect.appendChild(opt);
                     });
                 }
                 callStatus.textContent = roster.length ? 'Select a user to call.' : 'No other users in room yet.';
                 break;
             }
-            case 'join':
+            case 'ring-no-match': {
+                // Server reports no matching recipients for requested language
+                huntAllActive = false;
+                huntWinner = null;
+                inCallWith = null;
+                ringingFrom = null;
+                clearRingTimer();
+                if (endBtn) endBtn.disabled = true;
+                if (callBtn) callBtn.disabled = false;
+                if (callAllBtn) callAllBtn.disabled = false;
+                const lf = (data.langFilter || '').toString();
+                callStatus.textContent = lf ? `No receptionists available for language "${lf}".` : 'No recipients available.';
+                break;
+            }
+            case 'join': {
                 // Someone joined the room; roster updates will follow from server. No auto-call.
                 break;
+            }
             case 'ring': {
                 if (!from || from === localId) break;
                 // If already busy (in a call or already ringing), auto-reply busy
@@ -345,15 +437,25 @@ async function joinSession(opts) {
                 inCallWith = null;
                 if (pickupBtn) { pickupBtn.disabled = false; }
                 if (declineBtn) { declineBtn.disabled = false; }
+                // If I'm not a callee, temporarily show pickup UI (for escalation fallback)
+                if (role !== 'callee') {
+                    if (pickupBtn) pickupBtn.style.display = 'inline-block';
+                    if (declineBtn) declineBtn.style.display = 'inline-block';
+                    tempPickupUi = true;
+                }
                 callStatus.textContent = `Incoming call from #${from}.`;
                 break;
             }
             case 'busy': {
                 if (!from || from === localId) break;
-                if (inCallWith === from) {
+                if (serialActive && inCallWith === from) {
+                    callStatus.textContent = `User #${from} is busy. Trying next...`;
+                    clearRingTimer();
+                    serialIndex++;
+                    ringNextSerial(10000);
+                } else if (inCallWith === from) {
                     callStatus.textContent = `User #${from} is busy.`;
                     clearRingTimer();
-                    // Reset caller UI
                     inCallWith = null;
                     if (endBtn) endBtn.disabled = true;
                     if (callBtn) callBtn.disabled = false;
@@ -368,12 +470,22 @@ async function joinSession(opts) {
                     ringingFrom = null;
                     if (pickupBtn) pickupBtn.disabled = true;
                     if (declineBtn) declineBtn.disabled = true;
+                    if (tempPickupUi && role !== 'callee') {
+                        if (pickupBtn) pickupBtn.style.display = 'none';
+                        if (declineBtn) declineBtn.style.display = 'none';
+                        tempPickupUi = false;
+                    }
                 }
                 break;
             }
             case 'decline': {
                 if (!from || from === localId) break;
-                if (inCallWith === from || (peerSelect && peerSelect.value === from)) {
+                if (serialActive && inCallWith === from) {
+                    callStatus.textContent = `User #${from} declined. Trying next...`;
+                    clearRingTimer();
+                    serialIndex++;
+                    ringNextSerial(10000);
+                } else if (inCallWith === from || (peerSelect && peerSelect.value === from)) {
                     callStatus.textContent = `User #${from} declined the call.`;
                     clearRingTimer();
                     inCallWith = null;
@@ -397,6 +509,14 @@ async function joinSession(opts) {
                     // Cancel others
                     signalingSocket.send(JSON.stringify({ type: 'cancel', roomId }));
                     callStatus.textContent = `First to answer: #${from}. Connecting...`;
+                } else if (serialActive) {
+                    // Accept only if it's the currently ringing serial target
+                    if (from !== inCallWith) {
+                        sendToPeer('busy', { roomId }, from);
+                        break;
+                    }
+                    serialActive = false;
+                    callStatus.textContent = `Call accepted by #${from}. Connecting...`;
                 } else {
                     callStatus.textContent = `Call accepted by #${from}. Connecting...`;
                 }
@@ -446,6 +566,9 @@ async function joinSession(opts) {
         callBtn.onclick = () => {
             const targetId = peerSelect && peerSelect.value;
             if (!targetId) { callStatus.textContent = 'Select someone to call.'; return; }
+            // Skip targets that are not online
+            const target = (roster || []).find(p => p.id === targetId);
+            if (target && target.status && target.status !== 'online') { callStatus.textContent = 'Target is not available.'; return; }
             if (inCallWith || ringingFrom) { callStatus.textContent = 'You are busy.'; return; }
             ringingFrom = null;
             inCallWith = targetId;
@@ -471,22 +594,89 @@ async function joinSession(opts) {
     if (callAllBtn) {
         callAllBtn.onclick = () => {
             if (inCallWith || ringingFrom) { callStatus.textContent = 'You are busy.'; return; }
-            huntAllActive = true;
-            huntWinner = null;
-            inCallWith = 'hunt-all'; // mark busy locally during hunting
-            // Broadcast ring to room (no 'to')
-            signalingSocket.send(JSON.stringify({ type: 'ring', roomId }));
-            callStatus.textContent = 'Ringing everyone in the room...';
-            clearRingTimer();
-            ringTimer = setTimeout(() => {
-                if (huntAllActive && !huntWinner) {
-                    callStatus.textContent = 'No one picked up.';
-                    signalingSocket.send(JSON.stringify({ type: 'cancel', roomId }));
-                    resetUiState();
+            // Require language selection for filtering
+            const langSelectEl = document.getElementById('language-select');
+            const langFilter = (langSelectEl && langSelectEl.value || '').toString().trim().toLowerCase();
+            if (!langFilter) { callStatus.textContent = 'Please select a language before Call All.'; return; }
+
+            const mode = (callModeSelect && callModeSelect.value) || 'parallel';
+
+            if (mode === 'parallel') {
+                const matches = (fullRoster || []).filter(p => (p.role || '') === 'callee' && (p.status || 'online') === 'online' && (p.lang || '').toString().trim().toLowerCase() === langFilter);
+                if (matches.length === 0) { callStatus.textContent = `No receptionists in room for language "${langFilter}".`; return; }
+                huntAllActive = true;
+                huntWinner = null;
+                inCallWith = 'hunt-all';
+                signalingSocket.send(JSON.stringify({ type: 'ring', roomId, langFilter }));
+                callStatus.textContent = `Ringing ${matches.length} receptionist(s) for language "${langFilter}"...`;
+                clearRingTimer();
+                ringTimer = setTimeout(() => {
+                    if (huntAllActive && !huntWinner) {
+                        callStatus.textContent = 'No one picked up.';
+                        signalingSocket.send(JSON.stringify({ type: 'cancel', roomId }));
+                        resetUiState();
+                    }
+                }, 25000);
+                if (callBtn) callBtn.disabled = true;
+                callAllBtn.disabled = true;
+                return;
+            }
+
+            if (mode === 'serial') {
+                const candidates = sortByLongestAvailable((fullRoster || []).filter(p => (p.role || '') === 'callee' && (p.status || 'online') === 'online' && (p.lang || '').toString().trim().toLowerCase() === langFilter));
+                if (candidates.length === 0) { callStatus.textContent = `No receptionists available for language "${langFilter}".`; return; }
+                startSerialDial(candidates, 10000);
+                return;
+            }
+
+            if (mode === 'escalation') {
+                const perfect = (fullRoster || []).filter(p => (p.role || '') === 'callee' && (p.status || 'online') === 'online' && (p.lang || '').toString().trim().toLowerCase() === langFilter);
+                if (perfect.length > 0) {
+                    huntAllActive = true;
+                    huntWinner = null;
+                    inCallWith = 'hunt-all';
+                    signalingSocket.send(JSON.stringify({ type: 'ring', roomId, langFilter }));
+                    callStatus.textContent = `Ringing ${perfect.length} perfect match(es) for "${langFilter}"...`;
+                    clearRingTimer();
+                    ringTimer = setTimeout(() => {
+                        if (huntAllActive && !huntWinner) {
+                            callStatus.textContent = 'No one picked up.';
+                            signalingSocket.send(JSON.stringify({ type: 'cancel', roomId }));
+                            resetUiState();
+                        }
+                    }, 25000);
+                    if (callBtn) callBtn.disabled = true;
+                    callAllBtn.disabled = true;
+                    return;
                 }
-            }, 25000);
-            if (callBtn) callBtn.disabled = true;
-            callAllBtn.disabled = true;
+                const anyCallee = (fullRoster || []).filter(p => (p.role || '') === 'callee' && (p.status || 'online') === 'online');
+                if (anyCallee.length > 0) {
+                    huntAllActive = true;
+                    huntWinner = null;
+                    inCallWith = 'hunt-all';
+                    signalingSocket.send(JSON.stringify({ type: 'ring', roomId }));
+                    callStatus.textContent = `No perfect match. Ringing ${anyCallee.length} receptionist(s) (any language)...`;
+                    clearRingTimer();
+                    ringTimer = setTimeout(() => {
+                        if (huntAllActive && !huntWinner) {
+                            callStatus.textContent = 'No one picked up.';
+                            signalingSocket.send(JSON.stringify({ type: 'cancel', roomId }));
+                            resetUiState();
+                        }
+                    }, 25000);
+                    if (callBtn) callBtn.disabled = true;
+                    callAllBtn.disabled = true;
+                    return;
+                }
+                const others = sortByLongestAvailable((fullRoster || []).filter(p => (p.status || 'online') === 'online'));
+                if (others.length > 0) {
+                    callStatus.textContent = 'No receptionists online. Escalating to any online user...';
+                    startSerialDial(others, 10000);
+                    return;
+                }
+                callStatus.textContent = 'No one online to receive the call.';
+                return;
+            }
         };
     }
 

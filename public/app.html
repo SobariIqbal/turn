@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Join WebRTC Session</title>
+        <style>
+                body { font-family: Arial, sans-serif; margin:0; }
+                .container { max-width: 420px; margin: 40px auto; padding: 0 16px; }
+                .card { background:#fff; border:1px solid #eee; box-shadow: 0 8px 24px rgba(0,0,0,0.06); border-radius:12px; padding:24px; }
+                h1, h2 { margin: 0 0 12px; }
+                p { color:#555; }
+                .grid { display:grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+                .full { grid-column: 1 / -1; }
+                .btn { display:inline-block; text-align:center; padding:10px 14px; border-radius:8px; border:1px solid #d0d7de; background:#f6f8fa; cursor:pointer; font-weight:600; }
+                .btn:hover { background:#eef1f4; }
+                .btn.primary { background:#0066ff; color:#fff; border-color:#0066ff; }
+                .btn.primary:hover { background:#0052cc; }
+                .muted { color:#777; font-size: 12px; }
+                .step { display:none; }
+                .step.active { display:block; }
+                input[type="text"] { width:100%; padding:10px; border-radius:8px; border:1px solid #d0d7de; }
+                #participants { display: flex; flex-wrap: wrap; margin: 16px auto; max-width: 920px; }
+                .participant { margin: 10px; }
+                video { width: 200px; height: auto; }
+                .controls { margin-top:12px; display:none; }
+        </style>
+</head>
+<body>
+        <div class="container">
+            <div class="card">
+                <h1>Join Session</h1>
+
+                <!-- Hidden fields to keep existing main.js contract unchanged -->
+                <input type="hidden" id="role-select" value="">
+                <input type="hidden" id="company-select" value="">
+                <input type="hidden" id="language-select" value="">
+
+                <!-- Step 1: Role -->
+                <div class="step active" id="step-role">
+                    <h2>Select Role</h2>
+                    <div class="grid">
+                        <button class="btn full" data-role="caller">Digital Reception (Caller)</button>
+                        <button class="btn full" data-role="callee">Reception Desk (Callee)</button>
+                    </div>
+                </div>
+
+                <!-- Step 2: Company -->
+                <div class="step" id="step-company">
+                    <h2>Select Company</h2>
+                    <div class="grid">
+                        <button class="btn" data-company="hospital">Hospital</button>
+                        <button class="btn" data-company="bank">Bank</button>
+                        <button class="btn" data-company="hotel">Hotel</button>
+                    </div>
+                </div>
+
+                <!-- Step 3: Language (optional) -->
+                <div class="step" id="step-language">
+                    <h2>Select Language <span class="muted">(optional)</span></h2>
+                    <div class="grid">
+                        <button class="btn" data-lang="en">English</button>
+                        <button class="btn" data-lang="nl">Dutch</button>
+                        <button class="btn" data-lang="de">German</button>
+                        <button class="btn" data-lang="fr">French</button>
+                        <button class="btn full" id="skip-language">Skip</button>
+                    </div>
+                </div>
+
+                <!-- Step 4: Name and Join -->
+                <div class="step" id="step-name">
+                    <h2>Your Name</h2>
+                    <input type="text" id="username" placeholder="Enter your name" required>
+                    <div style="margin-top:8px;">
+                        <input type="text" id="room-id" placeholder="Custom room ID (optional)">
+                    </div>
+                    <div class="grid" style="margin-top:10px;">
+                        <button class="btn primary full" id="join-btn">Start Session</button>
+                    </div>
+                    <p class="muted" id="summary" style="margin-top:8px;"></p>
+                </div>
+
+                <!-- Post-join media controls -->
+                <div class="controls" id="media-controls">
+                    <button id="mute-btn" class="btn">Mute</button>
+                    <button id="video-btn" class="btn">Turn Off Video</button>
+                    <button id="share-screen-btn" class="btn">Share Screen</button>
+                </div>
+
+                <hr>
+                <div id="call-controls" style="display:none; text-align:left;">
+                        <label for="peer-select">Room participants:</label>
+                        <select id="peer-select" style="width:100%;"></select>
+            <div id="call-mode-wrap" class="muted" style="margin-top:8px; display:none;">
+                <label for="call-mode"><strong>Call Mode</strong>:</label>
+                <select id="call-mode">
+                <option value="parallel">Option A – Parallel</option>
+                <option value="serial">Option B – Serial</option>
+                <option value="escalation">Option C – Escalation</option>
+                </select>
+            </div>
+                        <div style="margin-top:8px;">
+                                <button id="call-btn">Call</button>
+                                <button id="call-all-btn">Call All</button>
+                                <button id="end-btn" disabled>End Call</button>
+                                <button id="pickup-btn" disabled>Pick Up</button>
+                                <button id="decline-btn" disabled>Decline</button>
+                        </div>
+                        <div id="call-status" style="margin-top:8px; color:#555;"></div>
+                </div>
+            </div>
+        </div>
+
+        <div id="participants"></div>
+
+        <script>
+            (function() {
+                const $ = (sel) => document.querySelector(sel);
+                const roleInput = $('#role-select');
+                const companyInput = $('#company-select');
+                const langInput = $('#language-select');
+
+                function showStep(id) {
+                    document.querySelectorAll('.step').forEach(s => s.classList.remove('active'));
+                    const el = document.getElementById(id);
+                    if (el) el.classList.add('active');
+                }
+
+                // Role step
+                document.querySelectorAll('[data-role]').forEach(btn => {
+                    btn.addEventListener('click', () => {
+                        roleInput.value = btn.getAttribute('data-role');
+                        showStep('step-company');
+                    });
+                });
+
+                // Company step
+                document.querySelectorAll('[data-company]').forEach(btn => {
+                    btn.addEventListener('click', () => {
+                        companyInput.value = btn.getAttribute('data-company');
+                        showStep('step-language');
+                    });
+                });
+
+                // Language step
+                document.querySelectorAll('[data-lang]').forEach(btn => {
+                    btn.addEventListener('click', () => {
+                        langInput.value = btn.getAttribute('data-lang');
+                        const r = roleInput.value || '-';
+                        const c = companyInput.value || '-';
+                        const l = langInput.value || 'none';
+                        const summary = document.getElementById('summary');
+                        if (summary) summary.textContent = `Selected: role=${r}, company=${c}, language=${l}`;
+                        showStep('step-name');
+                    });
+                });
+                const skip = document.getElementById('skip-language');
+                if (skip) skip.addEventListener('click', () => {
+                    langInput.value = '';
+                    const r = roleInput.value || '-';
+                    const c = companyInput.value || '-';
+                    const l = 'none';
+                    const summary = document.getElementById('summary');
+                    if (summary) summary.textContent = `Selected: role=${r}, company=${c}, language=${l}`;
+                    showStep('step-name');
+                });
+
+                // Reveal media controls after join (main.js will wire actions)
+                const joinBtn = document.getElementById('join-btn');
+                if (joinBtn) joinBtn.addEventListener('click', () => {
+                    const controls = document.getElementById('media-controls');
+                    if (controls) controls.style.display = 'block';
+                });
+            })();
+        </script>
+    <script src="main.js"></script>
+</body>
+</html>

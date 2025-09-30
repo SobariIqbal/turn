@@ -3,59 +3,24 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Join WebRTC Session</title>
+    <title>Welcome</title>
     <style>
-        body { font-family: Arial, sans-serif; }
-        .join-container { max-width: 300px; margin: 50px auto; text-align: center; }
-        input { width: 100%; padding: 10px; margin: 10px 0; }
-        button { padding: 10px 20px; margin: 10px 5px; }
-        #participants { display: flex; flex-wrap: wrap; }
-        .participant { margin: 10px; }
-        video { width: 200px; height: auto; }
+        body { font-family: Arial, sans-serif; margin:0; }
+        .hero { min-height: 100vh; display:flex; align-items:center; justify-content:center; background: #f7f7fb; }
+        .card { background:#fff; border:1px solid #eee; box-shadow: 0 8px 24px rgba(0,0,0,0.08); border-radius:12px; padding:32px; text-align:center; max-width:420px; }
+        h1 { margin: 0 0 12px; font-size: 24px; }
+        p { color:#555; margin: 0 0 24px; }
+        a.button { display:inline-block; padding:12px 18px; background:#0066ff; color:#fff; border-radius:8px; text-decoration:none; font-weight:600; }
+        a.button:hover { background:#0052cc; }
     </style>
 </head>
 <body>
-    <div class="join-container">
-        <h1>Join Session</h1>
-        <input type="text" id="username" placeholder="Enter your name" required>
-        <div style="text-align:left; margin-top:8px;">
-            <label for="role-select">Role</label>
-            <select id="role-select" style="width:100%;">
-                <option value="">-- Select role --</option>
-                <option value="caller">Digital Reception (Caller)</option>
-                <option value="callee">Reception Desk (Callee)</option>
-            </select>
-        </div>
-        <div style="text-align:left; margin-top:8px;">
-            <label for="language-select">Language</label>
-            <select id="language-select" style="width:100%;">
-                <option value="">-- Select language --</option>
-                <option value="en">English</option>
-                <option value="nl">Dutch</option>
-                <option value="de">German</option>
-                <option value="fr">French</option>
-            </select>
-        </div>
-        <input type="text" id="room-id" placeholder="Enter room ID (optional)" />
-        <button id="join-btn">Join</button>
-        <button id="mute-btn">Mute</button>
-        <button id="video-btn">Turn Off Video</button>
-        <button id="share-screen-btn">Share Screen</button>
-        <hr>
-        <div id="call-controls" style="display:none; text-align:left;">
-            <label for="peer-select">Room participants:</label>
-            <select id="peer-select" style="width:100%;"></select>
-            <div style="margin-top:8px;">
-                <button id="call-btn">Call</button>
-                <button id="call-all-btn">Call All</button>
-                <button id="end-btn" disabled>End Call</button>
-                <button id="pickup-btn" disabled>Pick Up</button>
-                <button id="decline-btn" disabled>Decline</button>
-            </div>
-            <div id="call-status" style="margin-top:8px; color:#555;"></div>
-        </div>
+    <div class="hero">
+      <div class="card">
+        <h1>Welcome to Digital Reception</h1>
+        <p>Press Start to enter the app and begin.</p>
+        <a class="button" href="app.html">Start</a>
+      </div>
     </div>
-    <div id="participants"></div>
-    <script src="main.js"></script>
 </body>
 </html>
